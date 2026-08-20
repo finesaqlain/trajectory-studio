@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trajectory Studio — Local Editor</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div><span class="eyebrow">WORKSPACE</span><h1>Task</h1></div>
+    <div class="header-files" aria-label="Loaded trajectory files">
+      <div class="header-file">
+        <div class="header-file-name"><span>ORIGINAL</span><strong id="headerOriginalName">No file uploaded</strong></div>
+        <div class="header-file-actions"><label class="button primary">Upload<input id="originalFile" type="file" accept=".json,.jsonl,application/json"></label><button id="resetOriginalUpload" class="button ghost" disabled>Reset</button></div>
+      </div>
+      <div class="header-file">
+        <div class="header-file-name"><span>EDITED</span><strong id="headerEditedName">No file uploaded</strong></div>
+        <div class="header-file-actions"><label class="button primary">Upload<input id="editedFile" type="file" accept=".json,.jsonl,application/json"></label><button id="resetEditedUpload" class="button ghost" disabled>Reset</button></div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div class="header-note"><span class="status-dot"></span>Local workspace</div>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-pressed="false" aria-label="Enable dark mode"><span class="theme-icon">☾</span><span class="theme-label">Dark mode</span></button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="pane trajectory-pane">
+      <div class="pane-heading">
+        <div><h2>Trajectory</h2><p id="originalMeta">No file loaded</p></div>
+      </div>
+      <div class="toolbar">
+        <label class="search"><span>⌕</span><input id="searchInput" placeholder="Search trajectory"></label>
+        <select id="roleFilter" aria-label="Filter trajectory"><option value="all">all</option></select>
+      </div>
+      <div id="originalList" class="event-list empty-state">
+        <div class="empty-icon">⇧</div><strong>Upload a trajectory</strong><span>JSON and JSONL are supported</span>
+      </div>
+    </section>
+
+    <section class="pane edited-pane">
+      <div class="pane-heading">
+        <div><h2>Edited Trajectory</h2><p id="editedMeta">No file loaded</p></div>
+        <div class="actions">
+          <button id="addAssistant" class="button ghost" disabled>＋ Assistant</button>
+          <button id="addToolCall" class="button ghost" disabled>＋ Tool Call</button>
+          <button id="resetAllEdited" class="button ghost" disabled>↶ Reset All</button>
+          <span id="dirtyCounter" class="dirty-counter" hidden>0 Dirty</span>
+          <select id="dirtyJump" class="change-select dirty-select" disabled aria-label="Jump to dirty section">
+            <option value="">Jump to dirty</option>
+          </select>
+          <select id="jumpChange" class="change-select" disabled aria-label="Jump to changed section">
+            <option value="">Jump to change</option>
+          </select>
+          <button id="downloadEdited" class="button ghost" disabled>Download</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <label class="search"><span>⌕</span><input id="editedSearchInput" placeholder="Search edited trajectory"></label>
+        <select id="editedRoleFilter" aria-label="Filter edited trajectory"><option value="all">all</option></select>
+      </div>
+      <div id="editedArea" class="edited-area empty-state">
+        <div class="empty-icon">⇧</div><strong>Upload the edited trajectory</strong><span>It will appear here for comparison</span>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status"></div>
+  <dialog id="confirmDialog" class="confirm-dialog">
+    <h3>Confirm reset</h3>
+    <p id="confirmMessage"></p>
+    <div class="confirm-actions"><button id="confirmNo" class="button ghost" type="button">No</button><button id="confirmYes" class="button primary" type="button">Yes</button></div>
+  </dialog>
+  <script src="app.js"></script>
+</body>
+</html>
