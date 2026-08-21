@@ -6,11 +6,14 @@ const $=id=>document.getElementById(id);
 
 function normalizeDocument(parsed){
   if(parsed && !Array.isArray(parsed) && Array.isArray(parsed.steps)){
+    const labeledSteps=parsed.steps.length>0&&parsed.steps.every(step=>step&&typeof step==='object'&&!Array.isArray(step)&&step.raw&&typeof step.raw==='object');
+    if(labeledSteps)return {events:parsed.steps.map(step=>step.raw),document:parsed,format:'labeled-steps'};
     const events=[];
     parsed.steps.forEach(step=>{
-      if(step && typeof step==='object') Object.values(step).forEach(event=>{
-        if(event && typeof event==='object') events.push(event);
-      });
+      if(step && typeof step==='object'){
+        const event=Object.values(step).find(value=>value&&typeof value==='object'&&!Array.isArray(value)&&(value.type||value.payload));
+        if(event)events.push(event);
+      }
     });
     if(!events.length) throw new Error('This trajectory contains no readable steps.');
     return {events,document:parsed,format:'wrapped'};
@@ -166,13 +169,14 @@ function setTheme(theme){
 function restoreWorkspace(){
   try{
     const saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||'null');if(!saved)return;
-    state.original=Array.isArray(saved.original)?saved.original:[];state.edited=Array.isArray(saved.edited)?saved.edited:[];
+    state.original=Array.isArray(saved.original)?saved.original:[];state.edited=Array.isArray(saved.edited)?saved.edited:[];state.originalDoc=saved.originalDoc||null;state.editedDoc=saved.editedDoc||null;
+    if(saved.originalDoc?.document){const normalized=normalizeDocument(saved.originalDoc.document);if(normalized.format==='labeled-steps'){state.original=normalized.events;state.originalDoc=normalized}}
     state.editedBaseline=Array.isArray(saved.editedBaseline)?saved.editedBaseline:JSON.parse(JSON.stringify(state.edited));
     state.cellBaselines=Array.isArray(saved.cellBaselines)?saved.cellBaselines:JSON.parse(JSON.stringify(state.editedBaseline));
     state.originIndexes=Array.isArray(saved.originIndexes)?saved.originIndexes:state.edited.map((_,i)=>i);
     state.drafts=JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}')||{};
     Object.entries(state.drafts).forEach(([key,draft])=>{const i=Number(key);if(!state.edited[i]||draft?.error)return;try{if(draft.mode==='raw')state.edited[i]=JSON.parse(draft.text);else updateStructuredContent(state.edited[i],draft.text)}catch{}});
-    state.originalDoc=saved.originalDoc||null;state.editedDoc=saved.editedDoc||null;state.originalName=saved.originalName||'Restored trajectory';state.editedName=saved.editedName||'Restored edited trajectory';
+    state.originalName=saved.originalName||'Restored trajectory';state.editedName=saved.editedName||'Restored edited trajectory';
     if(state.original.length){$('originalMeta').textContent=`${state.originalName} / ${state.original.length} events`;$('headerOriginalName').textContent=state.originalName;$('headerOriginalName').title=state.originalName;renderOriginal()}
     if(state.edited.length){$('headerEditedName').textContent=state.editedName;$('headerEditedName').title=state.editedName;renderEdited()}
     $('resetOriginalUpload').disabled=!state.original.length;$('resetEditedUpload').disabled=!state.edited.length;setEditedActionState();
@@ -301,6 +305,14 @@ async function loadFile(input,kind){
 
 function serializeEdited(){
   const source=state.editedDoc;
+  if(source?.format==='labeled-steps'){
+    const originalSteps=source.document.steps||[];
+    const steps=state.edited.map((event,index)=>{
+      const origin=state.originIndexes[index],existing=origin!==null&&origin!==undefined?originalSteps[origin]:null;
+      return existing?{...existing,id:`step_${index+1}`,index:index+1,title:labelFor(event,index),summary:contentFor(event).slice(0,240),timestamp:event.timestamp||existing.timestamp,raw:event}:{id:`step_${index+1}`,index:index+1,source:'manual',type:event.payload?.type||event.type,title:labelFor(event,index),summary:contentFor(event).slice(0,240),timestamp:event.timestamp,raw:event,status:'success'};
+    });
+    return JSON.stringify({...source.document,steps},null,2)+'\n';
+  }
   if(source?.format==='wrapped'){
     const output={...source.document,steps:state.edited.map((event,index)=>({[`step_${index}`]:event}))};
     return JSON.stringify(output,null,2)+'\n';
