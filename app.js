@@ -1,7 +1,7 @@
 const STORAGE_KEY='trajectory-editor-workspace-v1';
 const DRAFT_KEY='trajectory-editor-drafts-v1';
 const THEME_KEY='trajectory-editor-theme';
-const state={original:[],edited:[],editedBaseline:[],cellBaselines:[],originIndexes:[],drafts:{},selected:0,editedSelected:null,query:'',filter:'all',editedQuery:'',editedFilter:'all',originalDoc:null,editedDoc:null,expanded:new Set(),rawCards:new Set(),editedExpanded:new Set(),changeCursor:-1,copiedKey:null,originalName:'',editedName:''};
+const state={original:[],edited:[],editedBaseline:[],cellBaselines:[],originIndexes:[],drafts:{},selected:0,editedSelected:null,query:'',filter:'all',editedQuery:'',editedFilter:'all',originalDoc:null,editedDoc:null,expanded:new Set(),rawCards:new Set(),editedExpanded:new Set(),changeCursor:-1,copiedKey:null,undoStack:[],redoStack:[],originalName:'',editedName:''};
 const $=id=>document.getElementById(id);
 
 function normalizeDocument(parsed){
@@ -111,6 +111,15 @@ function copiedFeedback(button,label,key){
   document.querySelectorAll('.copy-cell.copied-state,.copy-structured.copied-state').forEach(previous=>{previous.innerHTML=`<span class="copy-icon">⧉</span> ${previous.dataset.copyLabel}`;previous.classList.remove('copied-state')});
   state.copiedKey=key;button.innerHTML='<span class="copy-icon copied">✓</span> Copied';button.classList.add('copied-state');button.dataset.copyLabel=label;
 }
+function editSnapshot(){return JSON.stringify({edited:state.edited,cellBaselines:state.cellBaselines,originIndexes:state.originIndexes,drafts:state.drafts,editedExpanded:[...state.editedExpanded],editedSelected:state.editedSelected,copiedKey:state.copiedKey})}
+function applyEditSnapshot(snapshot){
+  const data=JSON.parse(snapshot);state.edited=data.edited;state.cellBaselines=data.cellBaselines;state.originIndexes=data.originIndexes;state.drafts=data.drafts;state.editedExpanded=new Set(data.editedExpanded);state.editedSelected=data.editedSelected;state.copiedKey=data.copiedKey;
+  saveDrafts();saveWorkspace();renderEdited();updateHistoryButtons();
+}
+function updateHistoryButtons(){$('undoEdit').disabled=!state.undoStack.length;$('redoEdit').disabled=!state.redoStack.length}
+function recordHistory(){const snapshot=editSnapshot();if(state.undoStack.at(-1)!==snapshot)state.undoStack.push(snapshot);if(state.undoStack.length>30)state.undoStack.shift();state.redoStack=[];updateHistoryButtons()}
+function undoEdit(){if(!state.undoStack.length)return;state.redoStack.push(editSnapshot());applyEditSnapshot(state.undoStack.pop());toast('Edit undone')}
+function redoEdit(){if(!state.redoStack.length)return;state.undoStack.push(editSnapshot());applyEditSnapshot(state.redoStack.pop());toast('Edit redone')}
 function setEditedActionState(){const disabled=!state.edited.length;$('addAssistant').disabled=disabled;$('addToolCall').disabled=disabled;$('resetAllEdited').disabled=disabled}
 function manualId(prefix){return `${prefix}_${globalThis.crypto?.randomUUID?.()||Date.now().toString(36)}`}
 function newEditableEvent(kind){
@@ -124,12 +133,13 @@ function remapCellState(mapper){
   if(state.copiedKey){const [kind,index]=state.copiedKey.split(':'),next=mapper(Number(index));state.copiedKey=next===null?null:`${kind}:${next}`}
 }
 function addEditableCell(kind){
-  if(!state.edited.length)return;clearEditedFilters();const index=state.editedSelected===null?state.edited.length:Math.min(state.edited.length,state.editedSelected+1),cell=newEditableEvent(kind);
+  if(!state.edited.length)return;recordHistory();clearEditedFilters();const index=state.editedSelected===null?state.edited.length:Math.min(state.edited.length,state.editedSelected+1),cell=newEditableEvent(kind);
   remapCellState(i=>i>=index?i+1:i);state.edited.splice(index,0,cell);state.cellBaselines.splice(index,0,JSON.parse(JSON.stringify(cell)));state.originIndexes.splice(index,0,null);state.editedSelected=index;state.editedExpanded.add(index);saveDrafts();saveWorkspace();renderEdited();
   requestAnimationFrame(()=>{const cell=document.querySelector(`#editedArea [data-edit-index="${index}"]`);cell?.scrollIntoView({behavior:'smooth',block:'start'})});toast(`${kind==='assistant'?'Assistant':'Tool Call'} cell added`);
 }
 async function deleteEditableCell(index){
   if(!await askConfirmation(`Delete event ${index+1} from the edited trajectory?`))return;
+  recordHistory();
   state.edited.splice(index,1);state.cellBaselines.splice(index,1);state.originIndexes.splice(index,1);remapCellState(i=>i===index?null:i>index?i-1:i);
   if(state.editedSelected===index)state.editedSelected=null;else if(state.editedSelected>index)state.editedSelected--;
   saveDrafts();saveWorkspace();renderEdited();toast(`Event ${index+1} deleted`);
@@ -186,6 +196,7 @@ function renderOriginal(){
   $('originalList').innerHTML=entries.length?entries.map(({e,i})=>eventCard(e,i)).join(''):'<div class="empty-icon">⌕</div><strong>No matching events</strong><span>Try another search or filter</span>';
   document.querySelectorAll('.event-card').forEach(card=>{
     card.onclick=()=>{
+      const selection=getSelection();if(selection&&!selection.isCollapsed&&selection.toString())return;
       state.selected=Number(card.dataset.index);renderOriginal();
       document.querySelectorAll('#editedArea .event-editor').forEach(cell=>cell.classList.toggle('selected',Number(cell.dataset.editIndex)===state.selected));
     };
@@ -216,6 +227,7 @@ function bindTabs(scope,editable=false){
       block.querySelector('.copy-cell').onclick=async event=>{const button=event.currentTarget,draft=state.drafts[idx],value=draft?.mode==='raw'?draft.text:pretty(state.edited[idx]),copied=await copyText(value);if(copied){copiedFeedback(button,'JSON',`json:${idx}`);toast(`Event ${idx+1} JSON copied`)}else toast('Clipboard access failed. Allow clipboard permission and try again.',true)};
       block.querySelector('.copy-structured').onclick=async event=>{const button=event.currentTarget,draft=state.drafts[idx],value=draft?.mode==='structured'?draft.text:contentFor(state.edited[idx]),copied=await copyText(value);if(copied){copiedFeedback(button,'Structured',`structured:${idx}`);toast(`Event ${idx+1} structured data copied`)}else toast('Clipboard access failed. Allow clipboard permission and try again.',true)};
       block.querySelector('.reset-cell').onclick=()=>{
+        recordHistory();
         state.edited[idx]=JSON.parse(JSON.stringify(state.cellBaselines[idx]??state.editedBaseline[idx]??state.original[idx]??state.edited[idx]));delete state.drafts[idx];saveDrafts();saveWorkspace();
         const scroll=$('editedArea').scrollTop;renderEdited();$('editedArea').scrollTop=scroll;toast(`Event ${idx+1} reset`);
       };
@@ -225,6 +237,7 @@ function bindTabs(scope,editable=false){
         block.classList.toggle('collapsed',open);event.currentTarget.textContent=open?'Expand':'Collapse';
       };
       view.addEventListener('input',()=>{
+        if(view.dataset.historyCaptured!=='true'){recordHistory();view.dataset.historyCaptured='true'}
         view.dataset.touched='true';
         const mode=block.dataset.mode,text=view.textContent;let message='';
         try{if(mode==='raw')state.edited[idx]=JSON.parse(text);else updateStructuredContent(state.edited[idx],text)}
@@ -237,7 +250,7 @@ function bindTabs(scope,editable=false){
         updateEditedMeta();
         clearTimeout(view.saveTimer);view.saveTimer=setTimeout(saveWorkspace,350);
       });
-      view.addEventListener('blur',()=>{if(view.dataset.touched!=='true')return;view.dataset.touched='false';try{
+      view.addEventListener('blur',()=>{view.dataset.historyCaptured='false';if(view.dataset.touched!=='true')return;view.dataset.touched='false';try{
         if(block.dataset.mode==='raw'){state.edited[idx]=JSON.parse(view.textContent);view.textContent=pretty(state.edited[idx])}
         else{updateStructuredContent(state.edited[idx],view.textContent);view.textContent=contentFor(state.edited[idx])}
         state.drafts[idx]={mode:block.dataset.mode,text:view.textContent,error:''};saveDrafts();showDraftHighlight(view,view.textContent,baselineText(idx,block.dataset.mode));error.hidden=true;
@@ -279,7 +292,7 @@ async function loadFile(input,kind){
   try{
     const text=await file.text(),result=parseTrajectory(text),events=result.events;
     state[kind]=events;state[`${kind}Doc`]=result;state[`${kind}Name`]=file.name;state.expanded.clear();state.rawCards.clear();state.changeCursor=-1;
-    if(kind==='edited'){state.editedBaseline=JSON.parse(JSON.stringify(events));state.cellBaselines=JSON.parse(JSON.stringify(events));state.originIndexes=events.map((_,i)=>i);state.editedSelected=null;state.drafts={};state.copiedKey=null;state.editedQuery='';state.editedFilter='all';$('editedSearchInput').value='';saveDrafts()}
+    if(kind==='edited'){state.editedBaseline=JSON.parse(JSON.stringify(events));state.cellBaselines=JSON.parse(JSON.stringify(events));state.originIndexes=events.map((_,i)=>i);state.editedSelected=null;state.drafts={};state.copiedKey=null;state.undoStack=[];state.redoStack=[];state.editedQuery='';state.editedFilter='all';$('editedSearchInput').value='';saveDrafts();updateHistoryButtons()}
     if(kind==='original'){state.selected=0;$('originalMeta').textContent=`${file.name} / ${events.length} events`;$('headerOriginalName').textContent=file.name;$('headerOriginalName').title=file.name;renderOriginal();if(state.edited.length)renderEdited();$('resetOriginalUpload').disabled=false}
     else{$('headerEditedName').textContent=file.name;$('headerEditedName').title=file.name;renderEdited();$('resetEditedUpload').disabled=false}
     saveWorkspace();toast(`${events.length} events loaded from ${file.name}`);
@@ -302,8 +315,10 @@ $('originalFile').onchange=e=>loadFile(e.target,'original');$('editedFile').onch
 $('searchInput').oninput=e=>{state.query=e.target.value.toLowerCase();renderOriginal()};$('roleFilter').onchange=e=>{state.filter=e.target.value;renderOriginal()};
 $('editedSearchInput').oninput=e=>{state.editedQuery=e.target.value.toLowerCase();renderEdited()};$('editedRoleFilter').onchange=e=>{state.editedFilter=e.target.value;renderEdited()};
 $('addAssistant').onclick=()=>addEditableCell('assistant');$('addToolCall').onclick=()=>addEditableCell('tool');
+$('undoEdit').onclick=undoEdit;$('redoEdit').onclick=redoEdit;
 $('resetAllEdited').onclick=async()=>{
   if(!await askConfirmation('Reset every edited section and remove all newly added cells?'))return;
+  recordHistory();
   state.edited=JSON.parse(JSON.stringify(state.editedBaseline));state.cellBaselines=JSON.parse(JSON.stringify(state.editedBaseline));state.originIndexes=state.edited.map((_,i)=>i);state.editedSelected=null;state.drafts={};state.copiedKey=null;state.editedExpanded.clear();state.changeCursor=-1;state.editedQuery='';state.editedFilter='all';$('editedSearchInput').value='';saveDrafts();saveWorkspace();renderEdited();toast('All edited sections reset');
 };
 $('resetOriginalUpload').onclick=async()=>{
@@ -316,7 +331,7 @@ $('resetOriginalUpload').onclick=async()=>{
 };
 $('resetEditedUpload').onclick=async()=>{
   if(!await askConfirmation('Clear the uploaded edited trajectory and all local drafts?'))return;
-  state.edited=[];state.editedBaseline=[];state.cellBaselines=[];state.originIndexes=[];state.editedSelected=null;state.editedDoc=null;state.editedName='';state.drafts={};state.copiedKey=null;state.editedExpanded.clear();state.changeCursor=-1;saveDrafts();
+  state.edited=[];state.editedBaseline=[];state.cellBaselines=[];state.originIndexes=[];state.editedSelected=null;state.editedDoc=null;state.editedName='';state.drafts={};state.copiedKey=null;state.undoStack=[];state.redoStack=[];state.editedExpanded.clear();state.changeCursor=-1;saveDrafts();updateHistoryButtons();
   state.editedQuery='';state.editedFilter='all';$('editedSearchInput').value='';$('editedRoleFilter').innerHTML='<option value="all">all</option>';
   $('headerEditedName').textContent='No file uploaded';$('headerEditedName').removeAttribute('title');
   $('editedMeta').textContent='No file loaded';$('editedArea').className='edited-area empty-state';$('editedArea').innerHTML='<div class="empty-icon">⇧</div><strong>Upload the edited trajectory</strong><span>It will appear here for comparison</span>';
@@ -335,6 +350,11 @@ $('dirtyJump').onchange=event=>{
 };
 $('downloadEdited').onclick=()=>{const blob=new Blob([serializeEdited()],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='trajectory-edited.json';a.click();URL.revokeObjectURL(a.href);toast('Edited trajectory downloaded')};
 $('themeToggle').onclick=()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');
+document.addEventListener('keydown',event=>{
+  if(!(event.ctrlKey||event.metaKey)||event.altKey)return;const key=event.key.toLowerCase();
+  if(key==='z'){event.preventDefault();event.shiftKey?redoEdit():undoEdit()}
+  else if(key==='y'){event.preventDefault();redoEdit()}
+});
 
 function enableParallelScroll(){
   const original=$('originalList'),edited=$('editedArea');let syncing=false;
