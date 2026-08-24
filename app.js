@@ -209,6 +209,8 @@ function renderOriginal(){
       set.has(i)?set.delete(i):set.add(i);renderOriginal();
     });
   });
+  const allExpanded=state.original.length>0&&state.original.every((_,i)=>state.expanded.has(i));
+  $('expandAllOriginal').disabled=!state.original.length;$('expandAllOriginal').textContent=allExpanded?'Collapse All':'Expand All';
 }
 function editorBlock(e,i,editable=false){
   const changed=editable&&isChanged(i);
@@ -325,6 +327,7 @@ function toast(message,isError=false){const t=$('toast');t.textContent=message;t
 
 $('originalFile').onchange=e=>loadFile(e.target,'original');$('editedFile').onchange=e=>loadFile(e.target,'edited');
 $('searchInput').oninput=e=>{state.query=e.target.value.toLowerCase();renderOriginal()};$('roleFilter').onchange=e=>{state.filter=e.target.value;renderOriginal()};
+$('expandAllOriginal').onclick=()=>{const expand=!state.original.every((_,i)=>state.expanded.has(i));state.expanded=expand?new Set(state.original.map((_,i)=>i)):new Set();renderOriginal();toast(expand?'All original events expanded':'All original events collapsed')};
 $('editedSearchInput').oninput=e=>{state.editedQuery=e.target.value.toLowerCase();renderEdited()};$('editedRoleFilter').onchange=e=>{state.editedFilter=e.target.value;renderEdited()};
 $('addAssistant').onclick=()=>addEditableCell('assistant');$('addToolCall').onclick=()=>addEditableCell('tool');
 $('undoEdit').onclick=undoEdit;$('redoEdit').onclick=redoEdit;
@@ -339,7 +342,7 @@ $('resetOriginalUpload').onclick=async()=>{
   $('originalMeta').textContent='No file loaded';$('searchInput').value='';$('roleFilter').innerHTML='<option value="all">all</option>';
   $('headerOriginalName').textContent='No file uploaded';$('headerOriginalName').removeAttribute('title');
   $('originalList').className='event-list empty-state';$('originalList').innerHTML='<div class="empty-icon">⇧</div><strong>Upload a trajectory</strong><span>JSON and JSONL are supported</span>';
-  $('resetOriginalUpload').disabled=true;if(state.edited.length)renderEdited();saveWorkspace();toast('Original trajectory cleared');
+  $('expandAllOriginal').disabled=true;$('expandAllOriginal').textContent='Expand All';$('resetOriginalUpload').disabled=true;if(state.edited.length)renderEdited();saveWorkspace();toast('Original trajectory cleared');
 };
 $('resetEditedUpload').onclick=async()=>{
   if(!await askConfirmation('Clear the uploaded edited trajectory and all local drafts?'))return;
